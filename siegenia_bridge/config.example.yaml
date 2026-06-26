@@ -1,0 +1,54 @@
+# =============================================================================
+# config.example.yaml — Beispielkonfiguration für die SIEGENIA AEROPAC MQTT-Bridge
+# Kopiere diese Datei nach config.yaml und passe die Werte an.
+# =============================================================================
+
+mqtt:
+  host: "192.168.1.10"        # IP/Hostname deines MQTT-Brokers
+  port: 1883
+  client_id: "siegenia-aeropac-bridge"
+  base_topic: "siegenia"      # Topic-Präfix: siegenia/<device_id>/...
+  # username: "mqttuser"      # optional, falls Broker Auth verlangt
+  # password: "mqttpass"
+
+# --- Home Assistant MQTT Discovery (optional) ---
+# Wenn aktiviert, publiziert die Bridge Auto-Discovery-Configs unter
+# 'homeassistant/...', sodass die Geräte in Home Assistant automatisch
+# erscheinen. Für openHAB / Node-RED / pures MQTT NICHT nötig -> false lassen.
+homeassistant:
+  discovery: false
+  discovery_prefix: "homeassistant"
+
+# --- Geräte (beliebig viele) ---
+# Tipp: Das Gerät kennt seinen Namen selbst (devicename via API). 'name' hier
+# ist nur für die Anzeige in HA-Discovery; lässt du es weg, wird es aus 'id'
+# abgeleitet. Die 'id' bestimmt die MQTT-Topics (siegenia/<id>/...).
+#
+# WICHTIG zum 'user': Das Gerät erlaubt pro Account nur EINE aktive Session.
+# Die offizielle Siegenia-App nutzt 'user'. Wenn die App parallel laufen soll,
+# nutze für die Bridge 'admin' (eigene Session). Nur wenn die App nie parallel
+# gebraucht wird, kann 'user' (weniger Rechte) verwendet werden.
+devices:
+  - id: "aeropac_eltern"
+    name: "AEROPAC Eltern"      # optional, nur für HA-Anzeige
+    ip: "192.168.1.50"
+    user: "admin"
+    password: "0000"
+    port: 443
+    long_life: true
+    heartbeat_interval: 25      # Sek. zwischen keepAlive-Pings. Gemessener
+                                #   Geräte-Timeout ohne Ping: ~61s -> 25s ist sicher.
+    min_write_interval: 3.0     # Mindestabstand (s) zwischen Schreibbefehlen
+    debug: false
+
+  - id: "aeropac_kind"
+    name: "AEROPAC Kind"
+    ip: "192.168.1.51"
+    user: "admin"
+    password: "0000"
+
+  - id: "aeropac_wohnzimmer"
+    name: "AEROPAC Wohnzimmer"
+    ip: "192.168.1.52"
+    user: "admin"
+    password: "0000"

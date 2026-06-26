@@ -1,0 +1,19 @@
+# Konfiguration mit Geheimnissen (Passwörter!) niemals committen
+siegenia_bridge/config.yaml
+siegenia_bridge/config.*.yaml
+!siegenia_bridge/config.example.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Temporär
+*.log

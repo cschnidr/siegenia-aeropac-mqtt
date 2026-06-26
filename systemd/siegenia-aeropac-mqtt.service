@@ -1,0 +1,36 @@
+# =============================================================================
+# siegenia-aeropac-mqtt.service — systemd-Unit für die SIEGENIA AEROPAC MQTT-Bridge
+#
+# Installation:
+#   1. Repo nach /opt/siegenia-aeropac-mqtt kopieren (oder Pfade unten anpassen)
+#   2. venv anlegen + Requirements installieren (siehe README)
+#   3. config.yaml aus config.example.yaml erstellen und anpassen
+#   4. sudo cp systemd/siegenia-aeropac-mqtt.service /etc/systemd/system/
+#   5. sudo systemctl daemon-reload
+#   6. sudo systemctl enable --now siegenia-aeropac-mqtt
+#   7. journalctl -u siegenia-aeropac-mqtt -f
+# =============================================================================
+
+[Unit]
+Description=SIEGENIA AEROPAC MQTT Bridge
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Passe User/Pfade an deine Umgebung an:
+User=nobody
+Group=nogroup
+WorkingDirectory=/opt/siegenia-aeropac-mqtt/siegenia_bridge
+ExecStart=/opt/siegenia-aeropac-mqtt/venv/bin/python /opt/siegenia-aeropac-mqtt/siegenia_bridge/bridge.py /opt/siegenia-aeropac-mqtt/siegenia_bridge/config.yaml
+Restart=on-failure
+RestartSec=10
+
+# Härtung (optional, aber empfohlen)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
