@@ -29,7 +29,8 @@ import websocket  # websocket-client
 class SiegeniaDevice:
     def __init__(self, ip, user, password, port=443,
                  on_update=None, on_connect=None, on_disconnect=None,
-                 logger=None, long_life=True, heartbeat_interval=25):
+                 logger=None, long_life=True, heartbeat_interval=25,
+                 connect_timeout=30):
         self.ip = ip
         self.user = user
         self.password = password
@@ -38,6 +39,7 @@ class SiegeniaDevice:
         # Geräte-Timeout ohne keepAlive gemessen: ~61s (AEROPAC, FW 1.7.7).
         # 25s lässt komfortablen Puffer (Timeout/2 wäre ~30s).
         self.heartbeat_interval = heartbeat_interval
+        self.connect_timeout = connect_timeout
 
         self.on_update = on_update          # callback(data: dict)
         self.on_connect = on_connect        # callback()
@@ -127,7 +129,7 @@ class SiegeniaDevice:
             url,
             sslopt={"cert_reqs": ssl.CERT_NONE},
             origin=f"wss://{self.ip}:{self.port}",
-            timeout=10,
+            timeout=self.connect_timeout,
         )
 
         # Login
