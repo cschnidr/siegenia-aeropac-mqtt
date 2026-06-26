@@ -18,7 +18,17 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Passe User/Pfade an deine Umgebung an:
+# ANPASSEN: User/Group und alle drei Pfade müssen auf deine Installation zeigen.
+# Standard-Pfad: /opt/siegenia-aeropac-mqtt  (Beispiel unten)
+# Alternatives Beispiel: /var/lib/openhab/scripts/siegenia-aeropac-mqtt
+#
+# Zu ändernde Zeilen:
+#   User=       → Benutzer unter dem der Dienst laufen soll
+#   Group=      → zugehörige Gruppe
+#   WorkingDirectory= → <INSTALL_DIR>/siegenia_bridge
+#   ExecStart=  → <INSTALL_DIR>/venv/bin/python <INSTALL_DIR>/siegenia_bridge/bridge.py <INSTALL_DIR>/siegenia_bridge/config.yaml
+#
+# Falsche Pfade führen zu: status=200/CHDIR („No such file or directory")
 User=nobody
 Group=nogroup
 WorkingDirectory=/opt/siegenia-aeropac-mqtt/siegenia_bridge

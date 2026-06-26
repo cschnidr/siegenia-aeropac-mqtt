@@ -78,7 +78,10 @@ nano siegenia_bridge/config.yaml      # Broker, Geräte-IPs, Login anpassen
 
 ```bash
 sudo cp systemd/siegenia-aeropac-mqtt.service /etc/systemd/system/
-# Pfade/User in der Unit anpassen, dann:
+# WICHTIG: WorkingDirectory, ExecStart und User/Group in der Unit anpassen —
+# die Pfade müssen auf deine tatsächliche Installation zeigen.
+# Falsche Pfade → status=200/CHDIR in journalctl. Details stehen als Kommentar
+# direkt in der Unit-Datei.
 sudo systemctl daemon-reload
 sudo systemctl enable --now siegenia-aeropac-mqtt
 journalctl -u siegenia-aeropac-mqtt -f

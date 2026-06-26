@@ -309,7 +309,7 @@ class Bridge:
             log(f"MQTT verbunden mit {self._mqtt_host}:{self._mqtt_port}")
             client.publish(f"{self.base_topic}/bridge/online", "online", retain=True)
             # Re-Subscribe nach (Re-)Connect
-            for db in self.device_bridges.values():
+            for db in list(self.device_bridges.values()):
                 client.subscribe(f"{db.base}/set/#")
         else:
             log(f"MQTT-Verbindung fehlgeschlagen, rc={rc}")
