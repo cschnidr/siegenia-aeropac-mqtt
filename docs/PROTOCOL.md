@@ -53,6 +53,47 @@ sich nicht.
 Aus-Befehl ist `devicestate.deviceactive = false`. Beim Ausschalten setzt das
 Gerät `fanlevel` selbst auf 0.
 
+### Timer starten (Dauer-Countdown)
+
+**Wichtig:** Starten erfordert immer **zwei** separate `setDeviceParams`-Befehle in
+dieser Reihenfolge. Ein kombiniertes Schreiben funktioniert nicht.
+
+**Schritt 1 – Dauer setzen** (max. 18h):
+```json
+{"command":"setDeviceParams","params":{"timer":{"duration":{"hour":4,"minute":0}}},"id":N}
+```
+Push danach:
+```json
+{"command":"deviceParams","data":{"timer":{"duration":{"hour":4,"minute":0}}},"status":"update"}
+```
+
+**Schritt 2 – Timer aktivieren:**
+```json
+{"command":"setDeviceParams","params":{"timer":{"enabled":true}},"id":N}
+```
+Pushes danach (zwei separate Nachrichten):
+```json
+{"command":"deviceParams","data":{"timer":{"enabled":true}},"status":"update"}
+{"command":"deviceParams","data":{"timer":{"remainingtime":{"hour":3,"minute":59}}},"status":"update"}
+```
+
+### Timer abbrechen
+```json
+{"command":"setDeviceParams","params":{"timer":{"enabled":false}},"id":N}
+```
+Push danach:
+```json
+{"command":"deviceParams","data":{"timer":{"enabled":false,"remainingtime":{"hour":0,"minute":0}}},"status":"update"}
+```
+
+**Hinweise zum Timer:**
+- `timer.remainingtime` ist **read-only** — niemals schreiben.
+- `timer.duration` kann jederzeit neu gesetzt werden, auch während ein Timer läuft
+  (Gerät nimmt die neue Dauer erst beim nächsten Start an).
+- Nach Kaltstart ist `timer.poweron_time` oft ungültig (z. B. `hour:27`); das ist
+  solange folgenlos, wie `timer.enabled: false`. Absolute Wochentimer brauchen eine
+  gesetzte Geräteuhr (`clock`); die Bridge setzt die Uhr bewusst nicht.
+
 ### keepAlive
 ```json
 {"command":"keepAlive","id":N}        // App-Variante
@@ -90,10 +131,15 @@ Nach einer Zustandsänderung sendet das Gerät unaufgefordert:
 
 | Feld | Typ | Schreibbar | Bemerkung |
 |---|---|---|---|
+| Feld | Typ | Schreibbar | Bemerkung |
+|---|---|---|---|
 | `fanlevel` | 0–7 | ja | Lüfterstufe |
 | `devicestate.deviceactive` | bool | ja | Ein/Aus |
 | `devicename` | string | nein | frei vergebener Name |
 | `devicefloor` / `devicelocation` | string | nein | Standort-Metadaten |
-| `timer.*` | object | teils | Zeitsteuerung (nur über App komfortabel) |
+| `timer.duration` | `{hour, minute}` | ja | Dauer-Countdown; max. 18h |
+| `timer.enabled` | bool | ja | Timer starten/abbrechen (siehe oben) |
+| `timer.remainingtime` | `{hour, minute}` | **nein** | Restlaufzeit, nur Lesen |
+| `timer.poweron_time` | object | ja | Absoluter Wochentimer; braucht gesetzte Uhr |
 | `warnings` | array | nein | Warnungen, meist leer |
-| `clock` | object | (sync) | App synct Uhrzeit beim Connect |
+| `clock` | object | (sync) | App synct Uhrzeit beim Connect; Bridge tut das nicht |

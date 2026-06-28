@@ -53,6 +53,10 @@ class DeviceBridge:
         # Letzter bekannter State (für Idempotenz / Logging)
         self.last_state = {}
 
+        # Write-Error-Erkennung: zählt aufeinanderfolgende status:error-Antworten
+        self._write_error_count = 0
+        self._write_error_active = False
+
         # Schreib-Queue mit Debounce: das Gerät verträgt keine schnell
         # aufeinanderfolgenden Set-Befehle gut (verifiziert). Wir sammeln
         # gewünschte Werte und schreiben mit Mindestabstand.
@@ -189,6 +193,18 @@ class DeviceBridge:
             self._publish("status/active", "true" if active else "false", retain=True)
             changed.append(f"active={active}")
 
+        # Timer-Status
+        if "timer" in data and isinstance(data["timer"], dict):
+            t = data["timer"]
+            if "enabled" in t:
+                self._publish("status/timer_enabled", "true" if t["enabled"] else "false", retain=True)
+                changed.append(f"timer_enabled={t['enabled']}")
+            if "remainingtime" in t:
+                r = t["remainingtime"]
+                remaining_str = f"{r['hour']}:{r['minute']:02d}"
+                self._publish("status/timer_remaining", remaining_str, retain=True)
+                changed.append(f"timer_remaining={remaining_str}")
+
         # Vollständiges JSON als raw-Topic (nützlich für Debugging / weitere Felder)
         self._publish("status/raw", json.dumps(data), retain=True)
 
@@ -216,6 +232,29 @@ class DeviceBridge:
             val = payload.lower() in ("true", "on", "1", "yes", "ja")
             with self._write_lock:
                 self._pending_writes["active"] = val
+
+        elif what == "timer":
+            if payload.lower() == "off":
+                with self._write_lock:
+                    self._pending_writes.pop("timer_duration", None)
+                    self._pending_writes.pop("timer_enabled", None)
+                    self._pending_writes["timer_enabled"] = False
+            else:
+                # Format "H:MM" oder "H"
+                try:
+                    parts = payload.split(":")
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 else 0
+                except ValueError:
+                    log(f"[{self.device_id}] Ungültiger timer-Wert: {payload!r} (erwartet 'H:MM' oder 'off')")
+                    return
+                hour = max(0, min(18, hour))
+                minute = max(0, min(59, minute))
+                with self._write_lock:
+                    # timer_duration muss VOR timer_enabled in der Queue stehen
+                    self._pending_writes["timer_duration"] = (hour, minute)
+                    self._pending_writes.pop("timer_enabled", None)
+                    self._pending_writes["timer_enabled"] = True
 
         else:
             log(f"[{self.device_id}] Unbekanntes Command-Topic: {what}")
@@ -250,8 +289,42 @@ class DeviceBridge:
                     elif key == "active":
                         resp = self.device.set_active(value)
                         log(f"[{self.device_id}] set_active({value}) -> {self._status(resp)}")
+                    elif key == "timer_duration":
+                        hour, minute = value
+                        resp = self.device.set_timer_duration(hour, minute)
+                        log(f"[{self.device_id}] set_timer_duration({hour}h{minute}m) -> {self._status(resp)}")
+                        # kurze Pause bevor timer_enabled folgt (beide kommen oft in selber Queue)
+                        time.sleep(0.5)
+                    elif key == "timer_enabled":
+                        resp = self.device.set_timer_enabled(value)
+                        log(f"[{self.device_id}] set_timer_enabled({value}) -> {self._status(resp)}")
+                    else:
+                        resp = None
+                    self._handle_write_response(resp)
                 except Exception as e:
                     log(f"[{self.device_id}] Schreibfehler {key}={value}: {e}")
+
+    def _handle_write_response(self, resp):
+        """Wertet die Antwort eines setDeviceParams aus und aktualisiert den
+        Write-Error-Zustand. Schwelle: 2 aufeinanderfolgende status:error."""
+        status = self._status(resp)
+        if status == "ok":
+            self._write_error_count = 0
+            if self._write_error_active:
+                self._write_error_active = False
+                self._publish("status/write_error", "false", retain=True)
+                log(f"[{self.device_id}] Schreibzugriff wieder ok — write_error zurückgesetzt.")
+        elif status in ("error", "no-response"):
+            self._write_error_count += 1
+            if self._write_error_count >= 2 and not self._write_error_active:
+                self._write_error_active = True
+                self._publish("status/write_error", "true", retain=True)
+                log(
+                    f"[{self.device_id}] WARNUNG: Gerät lehnt Schreibzugriff ab "
+                    f"({self._write_error_count}x status:{status}) — "
+                    f"evtl. Power-Cycle nötig. "
+                    f"Topic: {self.base}/status/write_error = true"
+                )
 
     @staticmethod
     def _status(resp):

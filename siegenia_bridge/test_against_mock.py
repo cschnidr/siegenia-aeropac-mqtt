@@ -70,6 +70,35 @@ def main():
         assert off[-1].get("fanlevel") == 0, "FAIL: fanlevel nicht 0 nach aus"
         print("PASS: set_active(False) -> Push mit deviceactive=false, fanlevel=0")
 
+        # set_timer_duration
+        updates.clear()
+        dev.set_timer_duration(2, 30)
+        time.sleep(1.5)
+        timer_dur = [u for u in updates
+                     if u.get("timer", {}).get("duration") == {"hour": 2, "minute": 30}]
+        assert timer_dur, f"FAIL: kein Push mit timer.duration=2h30m, updates={updates}"
+        print("PASS: set_timer_duration(2, 30) -> Push mit timer.duration")
+
+        # set_timer_enabled(True) -> enabled-Push + remainingtime-Push
+        updates.clear()
+        dev.set_timer_enabled(True)
+        time.sleep(1.5)
+        timer_on = [u for u in updates if u.get("timer", {}).get("enabled") is True]
+        assert timer_on, f"FAIL: kein Push mit timer.enabled=true, updates={updates}"
+        timer_rem = [u for u in updates if "remainingtime" in u.get("timer", {})]
+        assert timer_rem, f"FAIL: kein remainingtime-Push nach Timer-Start, updates={updates}"
+        print("PASS: set_timer_enabled(True) -> enabled-Push + remainingtime-Push")
+
+        # set_timer_enabled(False) -> enabled=false + remainingtime=0
+        updates.clear()
+        dev.set_timer_enabled(False)
+        time.sleep(1.5)
+        timer_off = [u for u in updates
+                     if u.get("timer", {}).get("enabled") is False
+                     and u.get("timer", {}).get("remainingtime") == {"hour": 0, "minute": 0}]
+        assert timer_off, f"FAIL: kein korrekter Abbruch-Push, updates={updates}"
+        print("PASS: set_timer_enabled(False) -> enabled=false + remainingtime=0:00")
+
         dev.stop()
         time.sleep(0.5)
         print("\n=== ALLE TESTS BESTANDEN ===")

@@ -85,6 +85,22 @@ class SiegeniaDevice:
             params={"devicestate": {"deviceactive": bool(active)}},
         )
 
+    def set_timer_duration(self, hour: int, minute: int):
+        """Setzt die Timer-Dauer (max. 18h). Startet den Timer NICHT — dafür set_timer_enabled(True)."""
+        hour = max(0, min(18, int(hour)))
+        minute = max(0, min(59, int(minute)))
+        return self._send_command(
+            "setDeviceParams",
+            params={"timer": {"duration": {"hour": hour, "minute": minute}}},
+        )
+
+    def set_timer_enabled(self, enabled: bool):
+        """Startet (True) oder bricht (False) den Dauer-Countdown ab."""
+        return self._send_command(
+            "setDeviceParams",
+            params={"timer": {"enabled": bool(enabled)}},
+        )
+
     def get_device_params(self):
         return self._send_command("getDeviceParams")
 
@@ -186,6 +202,7 @@ class SiegeniaDevice:
             self._handle_message(msg)
 
     def _handle_message(self, msg):
+        self.log(f"[{self.ip}] RECV: {json.dumps(msg)}")
         msg_id = msg.get("id")
 
         # Antwort auf eine ID-korrelierte Anfrage?

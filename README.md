@@ -21,22 +21,113 @@ Prinzip wie `zigbee2mqtt` oder `tasmota`.
 - Event-getrieben: nutzt die Push-Updates des Geräts statt zu pollen
 - Robuste WebSocket-Verbindung mit Heartbeat & Auto-Reconnect
 - Schreib-Queue mit Debounce (das Gerät verträgt keine schnellen Set-Folgen)
+- **Dauer-Timer:** Gerät für N Stunden einschalten, danach automatisch aus
+- **Write-Error-Erkennung:** Diagnose-Topic wenn das Gerät Schreibbefehle ablehnt
 - Optionales **Home Assistant MQTT Discovery** (per Config-Flag, default aus)
 - Standalone-CLI zum Testen/Steuern ohne MQTT
 
 ## MQTT-Topics (plain – immer aktiv)
 
-| Topic | Richtung | Werte |
-|---|---|---|
-| `siegenia/<id>/status/online` | Bridge → | `online` / `offline` (retained) |
-| `siegenia/<id>/status/fanlevel` | Bridge → | `0`..`7` (retained) |
-| `siegenia/<id>/status/active` | Bridge → | `true` / `false` (retained) |
-| `siegenia/<id>/status/raw` | Bridge → | komplettes Geräte-JSON (retained) |
-| `siegenia/<id>/set/fanlevel` | → Bridge | `0`..`7` |
-| `siegenia/<id>/set/active` | → Bridge | `true`/`false`/`ON`/`OFF`/`1`/`0` |
-| `siegenia/bridge/online` | Bridge → | `online` / `offline` (LWT) |
-
 `<id>` ist die in der Config vergebene Geräte-ID.
+
+### Status (Bridge → System)
+
+| Topic | Werte | Bemerkung |
+|---|---|---|
+| `siegenia/<id>/status/online` | `online` / `offline` | retained, LWT |
+| `siegenia/<id>/status/fanlevel` | `0`..`7` | retained |
+| `siegenia/<id>/status/active` | `true` / `false` | retained |
+| `siegenia/<id>/status/timer_enabled` | `true` / `false` | retained |
+| `siegenia/<id>/status/timer_remaining` | `"H:MM"` z. B. `"3:59"` | retained, `"0:00"` wenn aus |
+| `siegenia/<id>/status/write_error` | `true` / `false` | retained; `true` = Gerät lehnt Schreibzugriff ab, evtl. Power-Cycle nötig |
+| `siegenia/<id>/status/raw` | JSON | komplettes Geräte-JSON (retained) |
+| `siegenia/bridge/online` | `online` / `offline` | LWT der Bridge |
+
+### Befehle (System → Bridge)
+
+| Topic | Werte | Bemerkung |
+|---|---|---|
+| `siegenia/<id>/set/fanlevel` | `0`..`7` | setzt Lüfterstufe; >0 schaltet Gerät automatisch ein |
+| `siegenia/<id>/set/active` | `true`/`false`/`ON`/`OFF`/`1`/`0` | Ein/Aus |
+| `siegenia/<id>/set/timer` | `"H:MM"` oder `"off"` | `"4:30"` = 4h30m-Countdown starten; `"off"` = abbrechen |
+
+## openHAB-Integration
+
+Voraussetzung: **MQTT Binding** (`org.openhab.binding.mqtt`) installiert und ein
+MQTT-Broker als Bridge-Thing konfiguriert.
+
+### Things (`things/siegenia.things`)
+
+```java
+Bridge mqtt:broker:local "MQTT Broker" [
+    host="192.168.1.10", port=1883
+]
+
+Thing mqtt:topic:aeropac_eltern "AEROPAC Eltern" (mqtt:broker:local) [
+    availabilityTopic="siegenia/aeropac_eltern/status/online",
+    payloadAvailable="online",
+    payloadNotAvailable="offline"
+] {
+    Channels:
+        Type switch : active "Aktiv" [
+            stateTopic="siegenia/aeropac_eltern/status/active",
+            commandTopic="siegenia/aeropac_eltern/set/active",
+            on="true", off="false"
+        ]
+        Type number : fanlevel "Lüfterstufe" [
+            stateTopic="siegenia/aeropac_eltern/status/fanlevel",
+            commandTopic="siegenia/aeropac_eltern/set/fanlevel"
+        ]
+        Type string : timer "Timer starten/abbrechen" [
+            commandTopic="siegenia/aeropac_eltern/set/timer"
+        ]
+        Type switch : timer_enabled "Timer aktiv" [
+            stateTopic="siegenia/aeropac_eltern/status/timer_enabled",
+            on="true", off="false"
+        ]
+        Type string : timer_remaining "Restlaufzeit" [
+            stateTopic="siegenia/aeropac_eltern/status/timer_remaining"
+        ]
+        Type switch : write_error "Schreibfehler" [
+            stateTopic="siegenia/aeropac_eltern/status/write_error",
+            on="true", off="false"
+        ]
+}
+```
+
+### Items (`items/siegenia.items`)
+
+```java
+Switch   Aeropac_Eltern_Active          "AEROPAC Eltern"          { channel="mqtt:topic:aeropac_eltern:active" }
+Number   Aeropac_Eltern_Fanlevel        "Lüfterstufe [%d]"        { channel="mqtt:topic:aeropac_eltern:fanlevel" }
+String   Aeropac_Eltern_Timer           "Timer"                   { channel="mqtt:topic:aeropac_eltern:timer" }
+Switch   Aeropac_Eltern_Timer_Enabled   "Timer läuft"             { channel="mqtt:topic:aeropac_eltern:timer_enabled" }
+String   Aeropac_Eltern_Timer_Remaining "Restlaufzeit [%s h]"     { channel="mqtt:topic:aeropac_eltern:timer_remaining" }
+Switch   Aeropac_Eltern_Write_Error     "Schreibfehler [MAP(yesno.map):%s]" { channel="mqtt:topic:aeropac_eltern:write_error" }
+```
+
+### Typische Regeln
+
+```java
+// Timer für 4 Stunden starten
+Aeropac_Eltern_Timer.sendCommand("4:00")
+
+// Timer abbrechen
+Aeropac_Eltern_Timer.sendCommand("off")
+
+// Lüfterstufe setzen (schaltet Gerät automatisch ein falls nötig)
+Aeropac_Eltern_Fanlevel.sendCommand(3)
+
+// Warnung loggen wenn Gerät Schreibzugriff ablehnt (→ Power-Cycle)
+rule "AEROPAC Schreibfehler"
+when
+    Item Aeropac_Eltern_Write_Error changed to ON
+then
+    logWarn("AEROPAC", "Gerät lehnt Schreibzugriff ab — evtl. Power-Cycle nötig")
+end
+```
+
+Für mehrere Geräte das Thing-/Item-Muster pro Gerät wiederholen (`aeropac_kind` etc.).
 
 ## Home Assistant (optional)
 

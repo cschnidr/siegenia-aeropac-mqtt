@@ -18,6 +18,11 @@ STATE = {
     "fanlevel": 0,
     "deviceactive": False,
     "devicename": "AEROPAC Mock",
+    "timer": {
+        "enabled": False,
+        "duration": {"hour": 0, "minute": 0},
+        "remainingtime": {"hour": 0, "minute": 0},
+    },
 }
 
 CLIENTS = set()
@@ -72,25 +77,43 @@ async def handler(ws):
 
             elif cmd == "setDeviceParams":
                 params = req.get("params", {})
-                changed = {}
+                # Erst ok quittieren
+                await ws.send(json.dumps({"id": rid, "status": "ok"}))
+                await asyncio.sleep(0.3)
+
                 if "fanlevel" in params:
                     STATE["fanlevel"] = params["fanlevel"]
-                    changed["fanlevel"] = params["fanlevel"]
-                if "devicestate" in params and "deviceactive" in params["devicestate"]:
+                    await push_update({
+                        "fanlevel": STATE["fanlevel"],
+                        "devicestate": {"deviceactive": STATE["deviceactive"]},
+                    })
+                elif "devicestate" in params and "deviceactive" in params["devicestate"]:
                     STATE["deviceactive"] = params["devicestate"]["deviceactive"]
-                    changed.setdefault("devicestate", {})["deviceactive"] = STATE["deviceactive"]
-                    # Beim Ausschalten geht fanlevel auf 0 (wie echtes Gerät)
                     if not STATE["deviceactive"]:
                         STATE["fanlevel"] = 0
-                        changed["fanlevel"] = 0
-                # Erst ok quittieren ...
-                await ws.send(json.dumps({"id": rid, "status": "ok"}))
-                # ... dann verzögert den Push schicken (wie echtes Gerät)
-                await asyncio.sleep(0.3)
-                await push_update({
-                    "fanlevel": STATE["fanlevel"],
-                    "devicestate": {"deviceactive": STATE["deviceactive"]},
-                })
+                    await push_update({
+                        "fanlevel": STATE["fanlevel"],
+                        "devicestate": {"deviceactive": STATE["deviceactive"]},
+                    })
+                elif "timer" in params:
+                    t = params["timer"]
+                    if "duration" in t:
+                        STATE["timer"]["duration"] = dict(t["duration"])
+                        await push_update({"timer": {"duration": STATE["timer"]["duration"]}})
+                    elif "enabled" in t:
+                        STATE["timer"]["enabled"] = t["enabled"]
+                        if t["enabled"]:
+                            # Timer gestartet: enabled-Push, dann remainingtime-Push
+                            await push_update({"timer": {"enabled": True}})
+                            await asyncio.sleep(0.1)
+                            await push_update({"timer": {"remainingtime": STATE["timer"]["duration"]}})
+                        else:
+                            # Timer abgebrochen
+                            STATE["timer"]["remainingtime"] = {"hour": 0, "minute": 0}
+                            await push_update({"timer": {
+                                "enabled": False,
+                                "remainingtime": {"hour": 0, "minute": 0},
+                            }})
 
             else:
                 await ws.send(json.dumps({"id": rid, "status": "ok"}))
