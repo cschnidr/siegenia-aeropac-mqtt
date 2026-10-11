@@ -73,6 +73,8 @@ class DeviceBridge:
             long_life=dev_cfg.get("long_life", True),
             heartbeat_interval=dev_cfg.get("heartbeat_interval", 25),
             connect_timeout=dev_cfg.get("connect_timeout", 30),
+            heartbeat_timeout=dev_cfg.get("heartbeat_timeout", 5),
+            missed_heartbeat_limit=dev_cfg.get("missed_heartbeat_limit", 2),
             on_update=self._on_device_update,
             on_connect=self._on_device_connect,
             on_disconnect=self._on_device_disconnect,

@@ -30,7 +30,8 @@ class SiegeniaDevice:
     def __init__(self, ip, user, password, port=443,
                  on_update=None, on_connect=None, on_disconnect=None,
                  logger=None, long_life=True, heartbeat_interval=25,
-                 connect_timeout=30):
+                 connect_timeout=30, heartbeat_timeout=5,
+                 missed_heartbeat_limit=2):
         self.ip = ip
         self.user = user
         self.password = password
@@ -40,6 +41,16 @@ class SiegeniaDevice:
         # 25s lässt komfortablen Puffer (Timeout/2 wäre ~30s).
         self.heartbeat_interval = heartbeat_interval
         self.connect_timeout = connect_timeout
+        # Heartbeat watchdog: keepAlive is sent synchronously and the device's
+        # id-correlated {"status":"ok"} reply is awaited. A *silent* failure
+        # (device hung / Wi-Fi black-hole: the TCP socket still looks ESTABLISHED
+        # but no frames come back) is otherwise invisible, because recv() never
+        # raises -- so the connection would stay falsely "online". After
+        # missed_heartbeat_limit unanswered pings in a row we force the socket
+        # closed, which makes _receive_loop return and _run_loop reconnect; a
+        # failed reconnect then fires on_disconnect -> online=offline.
+        self.heartbeat_timeout = heartbeat_timeout
+        self.missed_heartbeat_limit = max(1, int(missed_heartbeat_limit))
 
         self.on_update = on_update          # callback(data: dict)
         self.on_connect = on_connect        # callback()
@@ -229,17 +240,49 @@ class SiegeniaDevice:
                 self.log(f"[{self.ip}] on_update Fehler: {e}")
 
     def _heartbeat_loop(self):
+        missed = 0
         while not self._stop and self._connected:
             # in 1s-Schritten schlafen, damit stop() schnell greift
             for _ in range(self.heartbeat_interval):
                 if self._stop or not self._connected:
                     return
                 time.sleep(1)
+            # keepAlive SYNCHRON senden und auf die id-korrelierte Antwort warten.
+            # Keine Antwort = das Gerät reagiert nicht mehr, obwohl der Socket
+            # noch offen aussieht (stummer Ausfall). _send_command gibt in dem
+            # Fall None zurueck (Timeout) statt zu blockieren.
             try:
-                self._request_async("keepAlive", extend_session=True)
+                resp = self._send_command(
+                    "keepAlive", extend_session=True,
+                    timeout=self.heartbeat_timeout,
+                )
             except Exception as e:
                 self.log(f"[{self.ip}] Heartbeat-Fehler: {e}")
-                break
+                resp = None
+
+            if isinstance(resp, dict) and resp.get("status") == "ok":
+                missed = 0
+                continue
+
+            missed += 1
+            self.log(
+                f"[{self.ip}] keepAlive unbeantwortet "
+                f"({missed}/{self.missed_heartbeat_limit})"
+            )
+            if missed >= self.missed_heartbeat_limit:
+                # Verbindung ist tot, aber der Socket meldet es nicht. Aktiv
+                # schliessen -> _receive_loop kehrt zurueck -> _run_loop macht
+                # einen Reconnect; scheitert der, feuert on_disconnect und
+                # online wird offline.
+                self.log(
+                    f"[{self.ip}] {missed} keepAlive-Timeouts in Folge -- "
+                    f"Verbindung gilt als tot, erzwinge Reconnect."
+                )
+                try:
+                    self.ws.close()
+                except Exception:
+                    pass
+                return
 
     def _next_id(self):
         with self._lock:

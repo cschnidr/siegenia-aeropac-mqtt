@@ -38,6 +38,12 @@ devices:
     long_life: true
     heartbeat_interval: 25      # Sek. zwischen keepAlive-Pings. Gemessener
                                 #   Geräte-Timeout ohne Ping: ~61s -> 25s ist sicher.
+    heartbeat_timeout: 5        # Sec to await the keepAlive reply. No reply =
+                                #   device not responding (silent failure).
+    missed_heartbeat_limit: 2   # Unanswered keepAlives in a row before the
+                                #   connection is treated as dead and reconnected
+                                #   (-> online=offline). Watchdog for silent
+                                #   failures where the socket still looks open.
     min_write_interval: 3.0     # Mindestabstand (s) zwischen Schreibbefehlen
     debug: false
 
