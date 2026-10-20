@@ -59,6 +59,18 @@ async def handler(ws):
             elif cmd == "keepAlive":
                 await ws.send(json.dumps({"id": rid, "status": "ok"}))
 
+            elif cmd == "getDevice":
+                await ws.send(json.dumps({
+                    "data": {
+                        "devicename": STATE["devicename"],
+                        "hardwareversion": "1.11",
+                        "serialnr": "mock0001",
+                        "softwareversion": "1.7.7",
+                        "type": 1,
+                    },
+                    "id": rid, "status": "ok",
+                }))
+
             elif cmd == "getDeviceState":
                 await ws.send(json.dumps({
                     "data": {"deviceactive": STATE["deviceactive"]},
