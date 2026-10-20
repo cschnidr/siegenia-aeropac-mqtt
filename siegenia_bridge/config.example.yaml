@@ -44,6 +44,13 @@ devices:
                                 #   connection is treated as dead and reconnected
                                 #   (-> online=offline). Watchdog for silent
                                 #   failures where the socket still looks open.
+    board_check_interval: 600   # Sec between getDevice main-board checks (also
+                                #   run after each reconnect and failed write).
+                                #   keepAlive is answered by the Wi-Fi module
+                                #   alone, so a dead main board would otherwise
+                                #   stay "online". 0 = disabled.
+    board_fail_limit: 2         # Failed board checks in a row before
+                                #   online=offline and board=unavailable.
     min_write_interval: 3.0     # Mindestabstand (s) zwischen Schreibbefehlen
     debug: false
 

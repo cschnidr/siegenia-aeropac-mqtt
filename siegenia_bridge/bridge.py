@@ -11,6 +11,7 @@ Topic-Schema (plain, gut lesbar):
     siegenia/<device_id>/status/fanlevel       -> 0..7                    (retained)
     siegenia/<device_id>/status/active         -> "true" | "false"       (retained)
     siegenia/<device_id>/status/raw            -> komplettes JSON         (retained)
+    siegenia/<device_id>/status/board          -> "ok" | "unavailable"   (retained)
     siegenia/<device_id>/set/fanlevel          <- 0..7
     siegenia/<device_id>/set/active            <- "true"|"false"|"ON"|"OFF"|"1"|"0"
 
@@ -31,7 +32,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="paho")
 import paho.mqtt.client as mqtt
 import yaml
 
-from siegenia import SiegeniaDevice
+from siegenia import SiegeniaDevice, board_status
 
 
 def log(msg):
@@ -65,6 +66,17 @@ class DeviceBridge:
         self._min_write_interval = dev_cfg.get("min_write_interval", 3.0)
         self._last_write_ts = 0.0
 
+        # Main-board health check: keepAlive is answered by the Wi-Fi module
+        # alone, so a dead main board stays "online". getDevice reveals it
+        # (hardwareversion "UNAVAILABLE"). Checked every board_check_interval
+        # seconds, plus right after each (re)connect and after a failed write.
+        # 0 disables the check.
+        self._board_interval = int(dev_cfg.get("board_check_interval", 600))
+        self._board_fail_limit = max(1, int(dev_cfg.get("board_fail_limit", 2)))
+        self._board_fail_count = 0
+        self._board_ok = True       # False only after board_fail_limit failures
+        self._board_check_now = threading.Event()
+
         self.device = SiegeniaDevice(
             ip=dev_cfg["ip"],
             user=dev_cfg["user"],
@@ -83,12 +95,15 @@ class DeviceBridge:
 
         # Writer-Thread für die Debounce-Queue
         self._writer = threading.Thread(target=self._writer_loop, daemon=True)
+        self._board_thread = threading.Thread(target=self._board_loop, daemon=True)
 
     # ---------- Lifecycle ----------
 
     def start(self):
         self.device.start()
         self._writer.start()
+        if self._board_interval > 0:
+            self._board_thread.start()
         # Command-Topics abonnieren
         self.mqtt.subscribe(f"{self.base}/set/#")
         log(f"[{self.device_id}] Bridge gestartet, lausche auf {self.base}/set/#")
@@ -167,8 +182,12 @@ class DeviceBridge:
     # ---------- Geräte-Events -> MQTT ----------
 
     def _on_device_connect(self):
-        self._publish("status/online", "online", retain=True)
+        # A known-dead main board keeps the device offline across reconnects;
+        # the board check right after connect decides whether it recovered.
+        if self._board_ok:
+            self._publish("status/online", "online", retain=True)
         log(f"[{self.device_id}] Gerät verbunden")
+        self._board_check_now.set()
 
     def _on_device_disconnect(self):
         self._publish("status/online", "offline", retain=True)
@@ -317,6 +336,8 @@ class DeviceBridge:
                 self._publish("status/write_error", "false", retain=True)
                 log(f"[{self.device_id}] Schreibzugriff wieder ok — write_error zurückgesetzt.")
         elif status in ("error", "no-response"):
+            # A rejected write is the typical symptom of a dead main board.
+            self._board_check_now.set()
             self._write_error_count += 1
             if self._write_error_count >= 2 and not self._write_error_active:
                 self._write_error_active = True
@@ -327,6 +348,56 @@ class DeviceBridge:
                     f"evtl. Power-Cycle nötig. "
                     f"Topic: {self.base}/status/write_error = true"
                 )
+
+    # ---------- Main-board health check ----------
+
+    def _board_loop(self):
+        while True:
+            triggered = self._board_check_now.wait(self._board_interval)
+            self._board_check_now.clear()
+            if triggered:
+                # after a (re)connect: let the receive loop start first
+                time.sleep(3)
+            if not self.device.connected:
+                continue
+            try:
+                self._check_board()
+            except Exception as e:
+                log(f"[{self.device_id}] Board-Check-Fehler: {e}")
+
+    def _check_board(self):
+        resp = self.device.get_device_info()
+        if not isinstance(resp, dict) or resp.get("status") != "ok":
+            # no/failed reply: connection-level problem, the keepAlive
+            # watchdog handles that -- don't count it against the board
+            log(f"[{self.device_id}] Board-Check: getDevice -> {self._status(resp)}")
+            return
+        info = resp.get("data") or {}
+        result = board_status(info)
+        if result == "unavailable":
+            self._board_fail_count += 1
+            log(
+                f"[{self.device_id}] Board-Check: Hauptplatine nicht erreichbar "
+                f"(hardwareversion={info.get('hardwareversion')!r}, "
+                f"serialnr={info.get('serialnr')!r}) "
+                f"({self._board_fail_count}/{self._board_fail_limit})"
+            )
+            if self._board_fail_count >= self._board_fail_limit and self._board_ok:
+                self._board_ok = False
+                self._publish("status/board", "unavailable", retain=True)
+                self._publish("status/online", "offline", retain=True)
+                log(
+                    f"[{self.device_id}] WARNUNG: Hauptplatine antwortet nicht -- "
+                    f"online=offline. Gerät vermutlich stromlos machen."
+                )
+        elif result == "ok":
+            self._board_fail_count = 0
+            if not self._board_ok:
+                log(f"[{self.device_id}] Board-Check: Hauptplatine wieder erreichbar.")
+            self._board_ok = True
+            self._publish("status/board", "ok", retain=True)
+            self._publish("status/online", "online", retain=True)
+        # result None: payload says nothing about the board -> no change
 
     @staticmethod
     def _status(resp):

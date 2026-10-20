@@ -26,6 +26,31 @@ import time
 import websocket  # websocket-client
 
 
+# getDevice placeholders the Wi-Fi module reports when it cannot reach the
+# fan's main board (verified on AEROPAC, FW 1.7.7): the WebSocket, login and
+# keepAlive keep working, but writes fail and the cached state goes stale.
+_BOARD_UNAVAILABLE_HW = "UNAVAILABLE"
+_BOARD_UNAVAILABLE_SERIAL = "00000000"
+
+
+def board_status(info):
+    """Main-board health from a getDevice payload.
+
+    Returns "unavailable" if the Wi-Fi module reports its placeholder values,
+    "ok" if it reports a real hardware version, None if the payload does not
+    tell (missing fields are treated as unknown, never as a failure).
+    """
+    if not isinstance(info, dict):
+        return None
+    hw = info.get("hardwareversion")
+    serial = info.get("serialnr")
+    if hw == _BOARD_UNAVAILABLE_HW or serial == _BOARD_UNAVAILABLE_SERIAL:
+        return "unavailable"
+    if hw:
+        return "ok"
+    return None
+
+
 class SiegeniaDevice:
     def __init__(self, ip, user, password, port=443,
                  on_update=None, on_connect=None, on_disconnect=None,
@@ -117,6 +142,14 @@ class SiegeniaDevice:
 
     def get_device_state(self):
         return self._send_command("getDeviceState")
+
+    def get_device_info(self):
+        """getDevice: device metadata incl. hardwareversion (see board_status).
+
+        The reply is NOT passed to on_update: it carries no state, and
+        forwarding it would overwrite the bridge's status/raw topic.
+        """
+        return self._send_command("getDevice", emit=False)
 
     @property
     def connected(self):
@@ -223,7 +256,7 @@ class SiegeniaDevice:
             event.set()
             # getDeviceParams/State-Antworten enthalten ebenfalls Daten -> weiterreichen
             data = msg.get("data")
-            if isinstance(data, dict):
+            if holder.get("emit", True) and isinstance(data, dict):
                 self._emit_update(data)
             return
 
@@ -303,11 +336,13 @@ class SiegeniaDevice:
         self.ws.send(json.dumps(req))
         return req["id"]
 
-    def _send_command(self, command, params=None, timeout=5, _direct=False, **extra):
+    def _send_command(self, command, params=None, timeout=5, _direct=False,
+                      emit=True, **extra):
         """
         Sendet ein Kommando und wartet auf die ID-korrelierte Antwort.
         _direct=True wird nur beim Login innerhalb _connect_once genutzt,
         bevor die Empfangs-Schleife läuft (synchroner recv).
+        emit=False: die Antwort-Daten nicht an on_update weiterreichen.
         """
         req = self._build(command, params=params, **extra)
         self.log(f"[{self.ip}] SEND: {json.dumps(req)}")
@@ -322,7 +357,7 @@ class SiegeniaDevice:
             return None
 
         event = threading.Event()
-        holder = {"result": None}
+        holder = {"result": None, "emit": emit}
         self._pending[req["id"]] = (event, holder)
         self.ws.send(json.dumps(req))
 

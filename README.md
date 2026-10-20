@@ -34,13 +34,14 @@ Prinzip wie `zigbee2mqtt` oder `tasmota`.
 
 | Topic | Werte | Bemerkung |
 |---|---|---|
-| `siegenia/<id>/status/online` | `online` / `offline` | retained, LWT |
+| `siegenia/<id>/status/online` | `online` / `offline` | retained, LWT; auch `offline`, wenn die Hauptplatine nicht antwortet (siehe `board`) |
 | `siegenia/<id>/status/fanlevel` | `0`..`7` | retained |
 | `siegenia/<id>/status/active` | `true` / `false` | retained |
 | `siegenia/<id>/status/timer_enabled` | `true` / `false` | retained |
 | `siegenia/<id>/status/timer_remaining` | `"H:MM"` z. B. `"3:59"` | retained, `"0:00"` wenn aus |
 | `siegenia/<id>/status/write_error` | `true` / `false` | retained; `true` = Gerät lehnt Schreibzugriff ab, evtl. Power-Cycle nötig |
 | `siegenia/<id>/status/raw` | JSON | komplettes Geräte-JSON (retained) |
+| `siegenia/<id>/status/board` | `ok` / `unavailable` | retained; Ergebnis des `getDevice`-Checks (alle `board_check_interval` s, Default 600). `unavailable` = WLAN-Modul erreichbar, Hauptplatine nicht (Werte veraltet, Schreiben scheitert) → Gerät stromlos machen |
 | `siegenia/bridge/online` | `online` / `offline` | LWT der Bridge |
 
 ### Befehle (System → Bridge)
